@@ -28,6 +28,36 @@ export interface SearchSkill {
   installs: number;
 }
 
+export function formatInstallCommand(skill: Pick<SearchSkill, 'name' | 'slug' | 'source'>): string {
+  const pkg = skill.source || skill.slug;
+
+  if (/^https?:\/\//i.test(pkg)) {
+    return `npx skills add ${pkg} --skill ${skill.name}`;
+  }
+
+  return `${pkg}@${skill.name}`;
+}
+
+export function formatInstallHint(skill: Pick<SearchSkill, 'slug' | 'source'>): string {
+  const pkg = skill.source || skill.slug;
+
+  if (/^https?:\/\//i.test(pkg)) {
+    return `npx skills add ${pkg} --skill skill-name`;
+  }
+
+  return 'npx skills add <owner/repo@skill>';
+}
+
+export function formatSkillLink(skill: Pick<SearchSkill, 'name' | 'slug' | 'source'>): string {
+  const pkg = skill.source || skill.slug;
+
+  if (/^https?:\/\//i.test(pkg)) {
+    return `${pkg.replace(/\/$/, '')}/.well-known/skills/${skill.name}/SKILL.md`;
+  }
+
+  return `https://skills.sh/${skill.slug}`;
+}
+
 // Search via API
 export async function searchSkillsAPI(query: string): Promise<SearchSkill[]> {
   try {
@@ -289,16 +319,21 @@ ${DIM}  2) npx skills add <owner/repo@skill>${RESET}`;
       return;
     }
 
-    console.log(`${DIM}Install with${RESET} npx skills add <owner/repo@skill>`);
+    console.log(`${DIM}Install with${RESET} ${formatInstallHint(results[0]!)}`);
     console.log();
 
     for (const skill of results.slice(0, 6)) {
-      const pkg = skill.source || skill.slug;
       const installs = formatInstalls(skill.installs);
-      console.log(
-        `${TEXT}${pkg}@${skill.name}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`
-      );
-      console.log(`${DIM}└ https://skills.sh/${skill.slug}${RESET}`);
+      if (/^https?:\/\//i.test(skill.source || skill.slug)) {
+        console.log(`${TEXT}${skill.name}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`);
+        console.log(`${DIM}└ ${formatSkillLink(skill)}${RESET}`);
+      } else {
+        const installCommand = formatInstallCommand(skill);
+        console.log(
+          `${TEXT}${installCommand}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`
+        );
+        console.log(`${DIM}└ ${formatSkillLink(skill)}${RESET}`);
+      }
       console.log();
     }
     return;
