@@ -1,5 +1,6 @@
 import * as readline from 'readline';
 import { runAdd, parseAddOptions } from './add.ts';
+import { wellKnownProvider } from './providers/index.ts';
 import { track } from './telemetry.ts';
 import { isRepoPrivate } from './source-parser.ts';
 
@@ -28,6 +29,13 @@ export interface SearchSkill {
   installs: number;
 }
 
+type WellKnownSourceResolution = {
+  resolvedBaseUrl: string;
+  resolvedWellKnownPath: string;
+};
+
+const wellKnownSourceResolutionCache = new Map<string, Promise<WellKnownSourceResolution | null>>();
+
 export function formatInstallCommand(skill: Pick<SearchSkill, 'name' | 'slug' | 'source'>): string {
   const pkg = skill.source || skill.slug;
 
@@ -48,11 +56,39 @@ export function formatInstallHint(skill: Pick<SearchSkill, 'slug' | 'source'>): 
   return 'npx skills add <owner/repo@skill>';
 }
 
-export function formatSkillLink(skill: Pick<SearchSkill, 'name' | 'slug' | 'source'>): string {
+async function resolveWellKnownSource(
+  source: string
+): Promise<WellKnownSourceResolution | null> {
+  let cached = wellKnownSourceResolutionCache.get(source);
+  if (!cached) {
+    cached = wellKnownProvider.fetchIndex(source).then((result) => {
+      if (!result) {
+        return null;
+      }
+
+      return {
+        resolvedBaseUrl: result.resolvedBaseUrl,
+        resolvedWellKnownPath: result.resolvedWellKnownPath,
+      };
+    });
+    wellKnownSourceResolutionCache.set(source, cached);
+  }
+
+  return cached;
+}
+
+export async function formatSkillLink(
+  skill: Pick<SearchSkill, 'name' | 'slug' | 'source'>
+): Promise<string> {
   const pkg = skill.source || skill.slug;
 
   if (/^https?:\/\//i.test(pkg)) {
-    return `${pkg.replace(/\/$/, '')}/.well-known/skills/${skill.name}/SKILL.md`;
+    const resolved = await resolveWellKnownSource(pkg);
+    if (resolved) {
+      return `${resolved.resolvedBaseUrl.replace(/\/$/, '')}/${resolved.resolvedWellKnownPath}/${skill.name}/SKILL.md`;
+    }
+
+    return pkg;
   }
 
   return `https://skills.sh/${skill.slug}`;
@@ -325,14 +361,16 @@ ${DIM}  2) npx skills add <owner/repo@skill>${RESET}`;
     for (const skill of results.slice(0, 6)) {
       const installs = formatInstalls(skill.installs);
       if (/^https?:\/\//i.test(skill.source || skill.slug)) {
+        const skillLink = await formatSkillLink(skill);
         console.log(`${TEXT}${skill.name}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`);
-        console.log(`${DIM}└ ${formatSkillLink(skill)}${RESET}`);
+        console.log(`${DIM}└ ${skillLink}${RESET}`);
       } else {
         const installCommand = formatInstallCommand(skill);
+        const skillLink = await formatSkillLink(skill);
         console.log(
           `${TEXT}${installCommand}${RESET}${installs ? ` ${CYAN}${installs}${RESET}` : ''}`
         );
-        console.log(`${DIM}└ ${formatSkillLink(skill)}${RESET}`);
+        console.log(`${DIM}└ ${skillLink}${RESET}`);
       }
       console.log();
     }
